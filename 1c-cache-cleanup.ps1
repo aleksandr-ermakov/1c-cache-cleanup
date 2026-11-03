@@ -7,9 +7,8 @@
     Без параметров показывает базы, размер их кэша и меню действий.
     Кэш можно удалить полностью, только программный или только пользовательский —
     у всех найденных баз, у одной выбранной или у осиротевших баз.
-    С параметрами --ClearAll, --ClearProgramCache, --ClearUserCache и --ClearOrphaned
+    С параметрами -ClearAll, -ClearProgramCache, -ClearUserCache и -ClearOrphaned
     очистка выполняется сразу, без меню.
-    Ключи можно указывать с одним или двумя дефисами: -ClearAll и --ClearAll равнозначны.
 
 .PARAMETER IbasesPath
     Путь к файлу ibases.v8i с личным списком баз.
@@ -40,30 +39,26 @@
     Удаляет весь кэш осиротевших баз, без меню. Синоним: -o.
 
 .PARAMETER Help
-    Выводит эту справку и завершает работу. То же самое делают ключи -h и --help.
-
-.PARAMETER ExtraArgs
-    Внутренний параметр: принимает ключи с двумя дефисами, которые PowerShell
-    не передаёт в именованные параметры (например, --ClearAll).
+    Выводит эту справку и завершает работу. То же самое делает ключ -h.
 
 .EXAMPLE
     .\1c-cache-cleanup.ps1
     Без параметров показывает меню с размерами кэша.
 
 .EXAMPLE
-    .\1c-cache-cleanup.ps1 --ClearAll
+    .\1c-cache-cleanup.ps1 -ClearAll
     Удаляет программный и пользовательский кэш всех баз (синоним -a).
 
 .EXAMPLE
-    .\1c-cache-cleanup.ps1 --ClearProgramCache
+    .\1c-cache-cleanup.ps1 -ClearProgramCache
     Удаляет программный кэш всех баз (синоним -p).
 
 .EXAMPLE
-    .\1c-cache-cleanup.ps1 --ClearUserCache
+    .\1c-cache-cleanup.ps1 -ClearUserCache
     Удаляет пользовательский кэш всех баз (синоним -u).
 
 .EXAMPLE
-    .\1c-cache-cleanup.ps1 --ClearOrphaned
+    .\1c-cache-cleanup.ps1 -ClearOrphaned
     Удаляет весь кэш осиротевших баз (синоним -o).
 
 .EXAMPLE
@@ -71,7 +66,7 @@
     Показывает справку по скрипту.
 #>
 
-[CmdletBinding(PositionalBinding = $false)]
+[CmdletBinding()]
 param(
     [string] $IbasesPath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1CEStart\ibases.v8i'),
     [string] $StartCfgPath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1CEStart\1cestart.cfg'),
@@ -86,10 +81,7 @@ param(
     [Alias('o')]
     [switch] $ClearOrphaned,
     [Alias('h')]
-    [switch] $Help,
-    # Принимает аргументы с двойным дефисом: PowerShell не передаёт их в именованные параметры.
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]] $ExtraArgs
+    [switch] $Help
 )
 
 Set-StrictMode -Version Latest
@@ -799,37 +791,6 @@ function Wait-AnyKey {
         try { [void](Read-Host) } catch { }
     }
     Write-Host
-}
-
-# Аргументы вида --ClearAll PowerShell не разбирает как параметры — разбираем их сами.
-foreach ($argument in @($ExtraArgs)) {
-    if ([string]::IsNullOrEmpty($argument)) { continue }
-
-    if ($argument -notmatch '^--(?<name>[A-Za-z]+)$') {
-        Write-Host ('Ошибка: неизвестный аргумент «{0}».' -f $argument) -ForegroundColor Red
-        exit 1
-    }
-
-    $switchNames = @{
-        'ClearAll'          = 'ClearAll'
-        'ClearProgramCache' = 'ClearProgramCache'
-        'ClearUserCache'    = 'ClearUserCache'
-        'ClearOrphaned'     = 'ClearOrphaned'
-        'Help'              = 'Help'
-        'a'                 = 'ClearAll'
-        'p'                 = 'ClearProgramCache'
-        'u'                 = 'ClearUserCache'
-        'o'                 = 'ClearOrphaned'
-        'h'                 = 'Help'
-    }
-
-    $target = $switchNames[$Matches['name']]
-    if (-not $target) {
-        Write-Host ('Ошибка: неизвестный ключ «{0}».' -f $argument) -ForegroundColor Red
-        exit 1
-    }
-
-    Set-Variable -Name $target -Value $true -Scope Script
 }
 
 if ($Help) {
