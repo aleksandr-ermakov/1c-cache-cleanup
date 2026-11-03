@@ -9,6 +9,8 @@
     у всех найденных баз, у одной выбранной или у осиротевших баз.
     С параметрами --ClearAll, --ClearProgramCache, --ClearUserCache и --ClearOrphaned
     очистка выполняется сразу, без меню.
+    Ключи можно указывать с одним или двумя дефисами: -ClearAll и --ClearAll равнозначны.
+    Ключ --RecycleBin (-b) удаляет папки в корзину, а не безвозвратно.
 
 .PARAMETER IbasesPath
     Путь к файлу ibases.v8i с личным списком баз.
@@ -38,8 +40,17 @@
 .PARAMETER ClearOrphaned
     Удаляет весь кэш осиротевших баз, без меню. Синоним: -o.
 
+.PARAMETER RecycleBin
+    Удаляет папки кэша в корзину, а не безвозвратно. Синоним: -b.
+    Если корзина недоступна (например, не запущен проводник Windows),
+    система удалит папки безвозвратно.
+
 .PARAMETER Help
     Выводит эту справку и завершает работу. То же самое делают ключи -h и --help.
+
+.PARAMETER ExtraArgs
+    Внутренний параметр: принимает ключи с двумя дефисами, которые PowerShell
+    не передаёт в именованные параметры (например, --ClearAll).
 
 .EXAMPLE
     .\1c-cache-cleanup.ps1
@@ -62,11 +73,15 @@
     Удаляет весь кэш осиротевших баз (синоним -o).
 
 .EXAMPLE
+    .\1c-cache-cleanup.ps1 --ClearAll --RecycleBin
+    Удаляет кэш всех баз в корзину (синоним -b).
+
+.EXAMPLE
     .\1c-cache-cleanup.ps1 -h
     Показывает справку по скрипту.
 #>
 
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string] $IbasesPath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1CEStart\ibases.v8i'),
     [string] $StartCfgPath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1CEStart\1cestart.cfg'),
@@ -80,8 +95,13 @@ param(
     [switch] $ClearUserCache,
     [Alias('o')]
     [switch] $ClearOrphaned,
+    [Alias('b')]
+    [switch] $RecycleBin,
     [Alias('h')]
-    [switch] $Help
+    [switch] $Help,
+    # Принимает аргументы с двойным дефисом: PowerShell не передаёт их в именованные параметры.
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]] $ExtraArgs
 )
 
 Set-StrictMode -Version Latest
@@ -399,7 +419,8 @@ function Remove-1CCacheFolder {
         [Parameter(Mandatory = $true)]
         [string] $CacheRoot,
         [Parameter(Mandatory = $true)]
-        [guid] $Id
+        [guid] $Id,
+        [switch] $RecycleBin
     )
 
     $path = Join-Path -Path $CacheRoot -ChildPath ([string] $Id)
@@ -413,7 +434,17 @@ function Remove-1CCacheFolder {
         throw "Неожиданный путь кэша: $pathFull"
     }
 
-    Remove-Item -LiteralPath $pathFull -Recurse -Force
+    if ($RecycleBin) {
+        # Корзина: удаление через Microsoft.VisualBasic с установленным флагом SendToRecycleBin.
+        Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop
+        [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(
+            $pathFull,
+            [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs,
+            [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)
+    }
+    else {
+        Remove-Item -LiteralPath $pathFull -Recurse -Force
+    }
     return $true
 }
 
@@ -455,7 +486,7 @@ function Invoke-1CCacheCleanup {
 
         foreach ($target in $targets) {
             try {
-                if (Remove-1CCacheFolder -CacheRoot $target.Root -Id $base.Id) {
+                if (Remove-1CCacheFolder -CacheRoot $target.Root -Id $base.Id -RecycleBin:$script:RecycleBin) {
                     $removed++
                     $freed += $target.Size
                 }
@@ -737,12 +768,18 @@ function Show-1CCleanupResult {
 
     if ($Result.Removed -eq 0 -and $Result.Failed -eq 0) {
         Write-Host 'Нечего очищать.'
+        return
+    }
+
+    if ($script:RecycleBin) {
+        Write-Host ('Отправлено в корзину: {0}, {1}.' -f (Format-1CFolderCount -Count $Result.Removed), (Format-1CSize -Bytes $Result.Freed))
     }
     else {
         Write-Host ('Очищено: {0}, освобождено {1}.' -f (Format-1CFolderCount -Count $Result.Removed), (Format-1CSize -Bytes $Result.Freed))
-        if ($Result.Failed -gt 0) {
-            Write-Host ('Не удалось удалить: {0}.' -f (Format-1CFolderCount -Count $Result.Failed)) -ForegroundColor Yellow
-        }
+    }
+
+    if ($Result.Failed -gt 0) {
+        Write-Host ('Не удалось удалить: {0}.' -f (Format-1CFolderCount -Count $Result.Failed)) -ForegroundColor Yellow
     }
 }
 
@@ -764,7 +801,12 @@ function Show-1CCleanupResultLine {
         return
     }
 
-    Write-Host ('{0}: очищено {1}, освобождено {2}.' -f $Title, (Format-1CFolderCount -Count $Result.Removed), (Format-1CSize -Bytes $Result.Freed))
+    if ($script:RecycleBin) {
+        Write-Host ('{0}: отправлено в корзину {1}, {2}.' -f $Title, (Format-1CFolderCount -Count $Result.Removed), (Format-1CSize -Bytes $Result.Freed))
+    }
+    else {
+        Write-Host ('{0}: очищено {1}, освобождено {2}.' -f $Title, (Format-1CFolderCount -Count $Result.Removed), (Format-1CSize -Bytes $Result.Freed))
+    }
     if ($Result.Failed -gt 0) {
         Write-Host ('{0}: не удалось удалить {1}.' -f $Title, (Format-1CFolderCount -Count $Result.Failed)) -ForegroundColor Yellow
     }
@@ -792,12 +834,45 @@ function Wait-AnyKey {
     Write-Host
 }
 
+# Аргументы вида --ClearAll PowerShell не разбирает как параметры — разбираем их сами.
+foreach ($argument in @($ExtraArgs)) {
+    if ([string]::IsNullOrEmpty($argument)) { continue }
+
+    if ($argument -notmatch '^--(?<name>[A-Za-z]+)$') {
+        Write-Host ('Ошибка: неизвестный аргумент «{0}».' -f $argument) -ForegroundColor Red
+        exit 1
+    }
+
+    $switchNames = @{
+        'ClearAll'          = 'ClearAll'
+        'ClearProgramCache' = 'ClearProgramCache'
+        'ClearUserCache'    = 'ClearUserCache'
+        'ClearOrphaned'     = 'ClearOrphaned'
+        'RecycleBin'        = 'RecycleBin'
+        'Help'              = 'Help'
+        'a'                 = 'ClearAll'
+        'p'                 = 'ClearProgramCache'
+        'u'                 = 'ClearUserCache'
+        'o'                 = 'ClearOrphaned'
+        'b'                 = 'RecycleBin'
+        'h'                 = 'Help'
+    }
+
+    $target = $switchNames[$Matches['name']]
+    if (-not $target) {
+        Write-Host ('Ошибка: неизвестный ключ «{0}».' -f $argument) -ForegroundColor Red
+        exit 1
+    }
+
+    Set-Variable -Name $target -Value $true -Scope Script
+}
+
 if ($Help) {
     try {
         Get-Help -Name $PSCommandPath -Detailed
     }
     catch {
-        Write-Host 'Использование: .\1c-cache-cleanup.ps1 [-IbasesPath <путь>] [-StartCfgPath <путь>] [-UserCachePath <путь>] [-ProgramCachePath <путь>] [-ClearAll] [-ClearProgramCache] [-ClearUserCache] [-ClearOrphaned] [-h]'
+        Write-Host 'Использование: .\1c-cache-cleanup.ps1 [-IbasesPath <путь>] [-StartCfgPath <путь>] [-UserCachePath <путь>] [-ProgramCachePath <путь>] [-ClearAll] [-ClearProgramCache] [-ClearUserCache] [-ClearOrphaned] [-RecycleBin] [-h]'
     }
     exit 0
 }
@@ -806,6 +881,7 @@ $script:IbasesPath = $IbasesPath
 $script:StartCfgPath = $StartCfgPath
 $script:UserCachePath = $UserCachePath
 $script:ProgramCachePath = $ProgramCachePath
+$script:RecycleBin = [bool] $RecycleBin
 $script:State = $null
 
 function Update-1CState {
@@ -983,6 +1059,14 @@ function Invoke-1CCleanupCommands {
 }
 
 try {
+    # Для корзины нужна сборка Microsoft.VisualBasic — проверяем её заранее.
+    if ($script:RecycleBin) { Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop }
+
+    # Без проводника Windows корзина недоступна, и системное удаление станет безвозвратным.
+    if ($script:RecycleBin -and @(Get-Process -Name 'explorer' -ErrorAction SilentlyContinue).Count -eq 0) {
+        Write-Host 'ВНИМАНИЕ: проводник Windows не запущен — корзина может быть недоступна, папки удалятся безвозвратно.' -ForegroundColor Yellow
+    }
+
     Update-1CState
 
     if ($ClearAll -or $ClearProgramCache -or $ClearUserCache -or $ClearOrphaned) {
