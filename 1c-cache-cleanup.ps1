@@ -7,7 +7,7 @@
     Без параметров показывает базы, размер их кэша и меню действий.
     Кэш можно удалить полностью, только программный или только пользовательский —
     у всех найденных баз, у одной выбранной или у осиротевших баз.
-    С параметрами -CleanAll, -CleanLocalAppData, -CleanAppData и -CleanOrphaned
+    С параметрами --ClearAll, --ClearProgramCache, --ClearUserCache и --ClearOrphaned
     очистка выполняется сразу, без меню.
 
 .PARAMETER IbasesPath
@@ -26,29 +26,44 @@
     Каталог программного кэша баз (папки с именами-GUID).
     По умолчанию: %LOCALAPPDATA%\1C\1cv8.
 
-.PARAMETER CleanAll
-    Удаляет программный и пользовательский кэш всех баз, без меню.
+.PARAMETER ClearAll
+    Удаляет программный и пользовательский кэш всех баз, без меню. Синоним: -a.
 
-.PARAMETER CleanLocalAppData
-    Удаляет программный кэш всех баз, без меню.
+.PARAMETER ClearProgramCache
+    Удаляет программный кэш всех баз, без меню. Синоним: -p.
 
-.PARAMETER CleanAppData
-    Удаляет пользовательский кэш всех баз, без меню.
+.PARAMETER ClearUserCache
+    Удаляет пользовательский кэш всех баз, без меню. Синоним: -u.
 
-.PARAMETER CleanOrphaned
-    Удаляет весь кэш осиротевших баз, без меню.
+.PARAMETER ClearOrphaned
+    Удаляет весь кэш осиротевших баз, без меню. Синоним: -o.
 
 .PARAMETER Help
     Выводит эту справку и завершает работу. То же самое делают ключи -h и --help.
 
 .EXAMPLE
     .\1c-cache-cleanup.ps1
+    Без параметров показывает меню с размерами кэша.
 
 .EXAMPLE
-    .\1c-cache-cleanup.ps1 -CleanLocalAppData
+    .\1c-cache-cleanup.ps1 --ClearAll
+    Удаляет программный и пользовательский кэш всех баз (синоним -a).
+
+.EXAMPLE
+    .\1c-cache-cleanup.ps1 --ClearProgramCache
+    Удаляет программный кэш всех баз (синоним -p).
+
+.EXAMPLE
+    .\1c-cache-cleanup.ps1 --ClearUserCache
+    Удаляет пользовательский кэш всех баз (синоним -u).
+
+.EXAMPLE
+    .\1c-cache-cleanup.ps1 --ClearOrphaned
+    Удаляет весь кэш осиротевших баз (синоним -o).
 
 .EXAMPLE
     .\1c-cache-cleanup.ps1 -h
+    Показывает справку по скрипту.
 #>
 
 [CmdletBinding()]
@@ -57,10 +72,14 @@ param(
     [string] $StartCfgPath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1CEStart\1cestart.cfg'),
     [string] $UserCachePath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1cv8'),
     [string] $ProgramCachePath = (Join-Path -Path $env:LOCALAPPDATA -ChildPath '1C\1cv8'),
-    [switch] $CleanAll,
-    [switch] $CleanLocalAppData,
-    [switch] $CleanAppData,
-    [switch] $CleanOrphaned,
+    [Alias('a')]
+    [switch] $ClearAll,
+    [Alias('p')]
+    [switch] $ClearProgramCache,
+    [Alias('u')]
+    [switch] $ClearUserCache,
+    [Alias('o')]
+    [switch] $ClearOrphaned,
     [Alias('h')]
     [switch] $Help
 )
@@ -777,7 +796,7 @@ if ($Help) {
         Get-Help -Name $PSCommandPath -Detailed
     }
     catch {
-        Write-Host 'Использование: .\1c-cache-cleanup.ps1 [-IbasesPath <путь>] [-StartCfgPath <путь>] [-UserCachePath <путь>] [-ProgramCachePath <путь>] [-CleanAll] [-CleanLocalAppData] [-CleanAppData] [-CleanOrphaned] [-h]'
+        Write-Host 'Использование: .\1c-cache-cleanup.ps1 [-IbasesPath <путь>] [-StartCfgPath <путь>] [-UserCachePath <путь>] [-ProgramCachePath <путь>] [-ClearAll] [-ClearProgramCache] [-ClearUserCache] [-ClearOrphaned] [-h]'
     }
     exit 0
 }
@@ -917,10 +936,10 @@ function Invoke-1CCleanupCommands {
     #>
     [CmdletBinding()]
     param(
-        [switch] $CleanAll,
-        [switch] $CleanLocalAppData,
-        [switch] $CleanAppData,
-        [switch] $CleanOrphaned
+        [switch] $ClearAll,
+        [switch] $ClearProgramCache,
+        [switch] $ClearUserCache,
+        [switch] $ClearOrphaned
     )
 
     $failed = 0
@@ -931,28 +950,28 @@ function Invoke-1CCleanupCommands {
         Write-Host ('ВНИМАНИЕ: 1С запущена ({0}). Часть кэша может не удалиться.' -f ($running -join ', ')) -ForegroundColor Yellow
     }
 
-    if ($CleanAll) {
+    if ($ClearAll) {
         $result = Invoke-1CCacheCleanup -Bases $script:State.Bases -Kind All -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath
         Show-1CCleanupResultLine -Title 'Кэш всех баз' -Result $result
         $failed += $result.Failed
         Update-1CState
     }
 
-    if ($CleanLocalAppData) {
+    if ($ClearProgramCache) {
         $result = Invoke-1CCacheCleanup -Bases $script:State.Bases -Kind Program -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath
         Show-1CCleanupResultLine -Title 'Программный кэш всех баз' -Result $result
         $failed += $result.Failed
         Update-1CState
     }
 
-    if ($CleanAppData) {
+    if ($ClearUserCache) {
         $result = Invoke-1CCacheCleanup -Bases $script:State.Bases -Kind User -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath
         Show-1CCleanupResultLine -Title 'Пользовательский кэш всех баз' -Result $result
         $failed += $result.Failed
         Update-1CState
     }
 
-    if ($CleanOrphaned) {
+    if ($ClearOrphaned) {
         $result = Invoke-1CCacheCleanup -Bases $script:State.Orphans -Kind All -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath
         Show-1CCleanupResultLine -Title 'Кэш осиротевших баз' -Result $result
         $failed += $result.Failed
@@ -965,8 +984,8 @@ function Invoke-1CCleanupCommands {
 try {
     Update-1CState
 
-    if ($CleanAll -or $CleanLocalAppData -or $CleanAppData -or $CleanOrphaned) {
-        $failed = Invoke-1CCleanupCommands -CleanAll:$CleanAll -CleanLocalAppData:$CleanLocalAppData -CleanAppData:$CleanAppData -CleanOrphaned:$CleanOrphaned
+    if ($ClearAll -or $ClearProgramCache -or $ClearUserCache -or $ClearOrphaned) {
+        $failed = Invoke-1CCleanupCommands -ClearAll:$ClearAll -ClearProgramCache:$ClearProgramCache -ClearUserCache:$ClearUserCache -ClearOrphaned:$ClearOrphaned
         if ($failed -gt 0) { exit 1 }
         exit 0
     }
