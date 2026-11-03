@@ -455,6 +455,26 @@ function Format-1CSize {
     return ('{0:N1} MB' -f $megabytes)
 }
 
+function Show-1CCacheTotals {
+    <#
+    .SYNOPSIS
+        Показывает общий размер программного и пользовательского кэша.
+    #>
+    [CmdletBinding()]
+    param(
+        [object[]] $Bases
+    )
+
+    [long] $programTotal = 0
+    [long] $userTotal = 0
+    foreach ($base in $Bases) {
+        $programTotal += $base.ProgramCacheSize
+        $userTotal += $base.UserCacheSize
+    }
+
+    Write-Host ('Всего кэша: программный {0}, пользовательский {1}.' -f (Format-1CSize -Bytes $programTotal), (Format-1CSize -Bytes $userTotal))
+}
+
 function Format-1CFolderCount {
     <#
     .SYNOPSIS
@@ -513,8 +533,6 @@ function Show-1COrphanList {
 
     $programWidth = 'Программный'.Length
     $userWidth = 'Пользовательский'.Length
-    [long] $total = 0
-    foreach ($base in $Orphans) { $total += $base.TotalCacheSize }
 
     Write-Host
     Write-Host ('Осиротевшие базы: {0}.' -f $Orphans.Count)
@@ -526,7 +544,7 @@ function Show-1COrphanList {
         Write-Host ('  {0}  {1}  {2}' -f $base.Name, (Format-1CSize -Bytes $base.ProgramCacheSize).PadLeft($programWidth), (Format-1CSize -Bytes $base.UserCacheSize).PadLeft($userWidth))
     }
     Write-Host
-    Write-Host ('Общий размер кэшей: {0}.' -f (Format-1CSize -Bytes $total))
+    Show-1CCacheTotals -Bases $Orphans
 }
 
 function Get-1CRunningClientNames {
@@ -582,8 +600,8 @@ function Show-1CMainMenu {
         Write-Host ('Осиротевшие базы: {0}.' -f $State.Orphans.Count)
     }
 
-    Write-Host 
-    Write-Host 'Выберите дейстие с кэшем:'
+    Write-Host
+    Write-Host 'Выберите действие с кэшем:'
     if ($State.Bases.Count -gt 0) {
         Write-Host ('1. Очистить всё ({0})' -f (Format-1CSize -Bytes ($programTotal + $userTotal)))
         Write-Host ('2. Очистить программный кэш ({0})' -f (Format-1CSize -Bytes $programTotal))
@@ -644,6 +662,8 @@ function Show-1CBaseList {
             (Format-1CSize -Bytes $Bases[$i].UserCacheSize).PadLeft($userWidth))
     }
 
+    Write-Host
+    Show-1CCacheTotals -Bases $Bases
     Write-Host
     Write-Host '0. Назад'
     Write-Host
