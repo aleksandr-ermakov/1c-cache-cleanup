@@ -6,8 +6,7 @@
     Скрипт очищает кэш информационных баз 1С под Windows.
     Перед очисткой показывает базы, размер их кэша и меню действий.
     Кэш можно удалить полностью, только программный или только пользовательский —
-    у всех найденных баз или у одной выбранной.
-    Осиротевшие папки кэша скрипт только показывает.
+    у всех найденных баз, у одной выбранной или у осиротевших баз.
 
 .PARAMETER IbasesPath
     Путь к файлу ibases.v8i с личным списком баз.
@@ -252,7 +251,7 @@ function Get-1CCacheFolders {
 function Get-1CState {
     <#
     .SYNOPSIS
-        Собирает список баз с размерами кэша и список осиротевших папок кэша.
+        Собирает список баз с размерами кэша и список осиротевших баз.
     #>
     [CmdletBinding()]
     param(
@@ -307,22 +306,45 @@ function Get-1CState {
     # В список выводим только базы, у которых есть папка кэша (пользовательского или программного).
     $bases = @($bases | Where-Object { $_.HasUserCache -or $_.HasProgramCache })
 
-    # Осиротевшие папки кэша — те, что не соответствуют ни одной найденной базе.
-    $orphans = New-Object 'System.Collections.Generic.List[object]'
+    # Осиротевшие базы — папки кэша, для которых нет зарегистрированной базы.
+    # Одна база может иметь папки и в пользовательском, и в программном кэше.
+    $orphansById = @{}
     foreach ($cache in @(
-            [pscustomobject]@{ Kind = 'пользовательский'; Path = $UserCachePath }
-            [pscustomobject]@{ Kind = 'программный'; Path = $ProgramCachePath }
+            [pscustomobject]@{ IsUser = $true; Path = $UserCachePath }
+            [pscustomobject]@{ IsUser = $false; Path = $ProgramCachePath }
         )) {
         foreach ($folder in @(Get-1CCacheFolders -Path $cache.Path)) {
             if ($knownIds.Contains($folder.Id)) { continue }
-            $orphans.Add([pscustomobject]@{
-                    Id   = $folder.Name
-                    Kind = $cache.Kind
-                    Size = Get-1CFolderSizeBytes -Path $folder.Path
-                })
+
+            $key = [string] $folder.Id
+            if (-not $orphansById.ContainsKey($key)) {
+                $orphansById[$key] = [pscustomobject]@{
+                    Name             = $key
+                    Id               = $folder.Id
+                    UserCacheSize    = [long] 0
+                    ProgramCacheSize = [long] 0
+                }
+            }
+
+            $entry = $orphansById[$key]
+            if ($cache.IsUser) { $entry.UserCacheSize = Get-1CFolderSizeBytes -Path $folder.Path }
+            else { $entry.ProgramCacheSize = Get-1CFolderSizeBytes -Path $folder.Path }
         }
     }
-    $orphans = @($orphans | Sort-Object -Property Id, Kind)
+
+    # Осиротевшие базы сортируем по общему размеру кэша по убыванию.
+    $orphans = @(
+        foreach ($entry in $orphansById.Values) {
+            [pscustomobject]@{
+                Name             = $entry.Name
+                Id               = $entry.Id
+                UserCacheSize    = $entry.UserCacheSize
+                ProgramCacheSize = $entry.ProgramCacheSize
+                TotalCacheSize   = $entry.UserCacheSize + $entry.ProgramCacheSize
+            }
+        }
+    )
+    $orphans = @($orphans | Sort-Object -Property @{ Expression = { $_.TotalCacheSize }; Descending = $true }, @{ Expression = { $_.Name } })
 
     return [pscustomobject]@{
         Bases   = @($bases)
@@ -428,7 +450,9 @@ function Format-1CSize {
         [long] $Bytes
     )
 
-    return ('{0:N1} MB' -f ($Bytes / 1MB))
+    # Округляем вручную: PowerShell 5.1 и 7 по-разному обрабатывают ровно половину.
+    $megabytes = [math]::Round($Bytes / 1MB, 1, [System.MidpointRounding]::AwayFromZero)
+    return ('{0:N1} MB' -f $megabytes)
 }
 
 function Format-1CFolderCount {
@@ -475,10 +499,10 @@ function Read-1CChoice {
     return '0'
 }
 
-function Show-1COrphanDetails {
+function Show-1COrphanList {
     <#
     .SYNOPSIS
-        Показывает осиротевшие папки кэша подробно: по идентификаторам.
+        Показывает список осиротевших баз с размерами кэша и общий размер.
     #>
     [CmdletBinding()]
     param(
@@ -487,23 +511,22 @@ function Show-1COrphanDetails {
 
     if ($Orphans.Count -eq 0) { return }
 
-    [long] $size = 0
-    foreach ($orphan in $Orphans) { $size += $orphan.Size }
-
-    $kindWidth = 0
-    $sizeWidth = 0
-    foreach ($orphan in $Orphans) {
-        if ($orphan.Kind.Length -gt $kindWidth) { $kindWidth = $orphan.Kind.Length }
-        $text = Format-1CSize -Bytes $orphan.Size
-        if ($text.Length -gt $sizeWidth) { $sizeWidth = $text.Length }
-    }
+    $programWidth = 'Программный'.Length
+    $userWidth = 'Пользовательский'.Length
+    [long] $total = 0
+    foreach ($base in $Orphans) { $total += $base.TotalCacheSize }
 
     Write-Host
-    Write-Host ('Осиротевшие базы: {0}, {1}.' -f (Format-1CFolderCount -Count $Orphans.Count), (Format-1CSize -Bytes $size))
+    Write-Host ('Осиротевшие базы: {0}.' -f $Orphans.Count)
+    Write-Host 'Для этих баз нет зарегистрированной информационной базы.'
+    Write-Host 'Размер кэша указан в МБ: программный и пользовательский.'
     Write-Host
-    foreach ($orphan in $Orphans) {
-        Write-Host ('  {0}  {1}  {2}' -f $orphan.Id, $orphan.Kind.PadRight($kindWidth), (Format-1CSize -Bytes $orphan.Size).PadLeft($sizeWidth))
+    Write-Host ('  {0}  {1}  {2}' -f 'База'.PadRight(36), 'Программный'.PadLeft($programWidth), 'Пользовательский'.PadLeft($userWidth))
+    foreach ($base in $Orphans) {
+        Write-Host ('  {0}  {1}  {2}' -f $base.Name, (Format-1CSize -Bytes $base.ProgramCacheSize).PadLeft($programWidth), (Format-1CSize -Bytes $base.UserCacheSize).PadLeft($userWidth))
     }
+    Write-Host
+    Write-Host ('Общий размер кэшей: {0}.' -f (Format-1CSize -Bytes $total))
 }
 
 function Get-1CRunningClientNames {
@@ -521,13 +544,15 @@ function Get-1CRunningClientNames {
 function Show-1CMainMenu {
     <#
     .SYNOPSIS
-        Показывает главное меню.
+        Показывает главное меню и возвращает список допустимых пунктов.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [object] $State
     )
+
+    $allowed = @('0')
 
     [long] $programTotal = 0
     [long] $userTotal = 0
@@ -537,7 +562,7 @@ function Show-1CMainMenu {
     }
 
     [long] $orphansSize = 0
-    foreach ($orphan in $State.Orphans) { $orphansSize += $orphan.Size }
+    foreach ($base in $State.Orphans) { $orphansSize += $base.TotalCacheSize }
 
     # Предупреждаем, если клиент 1С запущен: часть файлов кэша может быть занята.
     $running = @(Get-1CRunningClientNames)
@@ -547,17 +572,33 @@ function Show-1CMainMenu {
     }
 
     Write-Host
-    Write-Host ('Базы с кэшем: {0}.' -f $State.Bases.Count)
-    if ($State.Orphans.Count -gt 0) {
-        Write-Host ('Осиротевшие базы: {0}, {1}.' -f (Format-1CFolderCount -Count $State.Orphans.Count), (Format-1CSize -Bytes $orphansSize))
+    if ($State.Bases.Count -gt 0) {
+        Write-Host ('Базы с кэшем: {0}.' -f $State.Bases.Count)
     }
-    Write-Host
-    Write-Host ('1. Очистить всё ({0})' -f (Format-1CSize -Bytes ($programTotal + $userTotal)))
-    Write-Host ('2. Очистить программный кэш ({0})' -f (Format-1CSize -Bytes $programTotal))
-    Write-Host ('3. Очистить пользовательский кэш ({0})' -f (Format-1CSize -Bytes $userTotal))
-    Write-Host '4. Выбрать базу...'
+    else {
+        Write-Host 'Базы с кэшем не найдены.'
+    }
+    if ($State.Orphans.Count -gt 0) {
+        Write-Host ('Осиротевшие базы: {0}.' -f $State.Orphans.Count)
+    }
+
+    Write-Host 
+    Write-Host 'Выберите дейстие с кэшем:'
+    if ($State.Bases.Count -gt 0) {
+        Write-Host ('1. Очистить всё ({0})' -f (Format-1CSize -Bytes ($programTotal + $userTotal)))
+        Write-Host ('2. Очистить программный кэш ({0})' -f (Format-1CSize -Bytes $programTotal))
+        Write-Host ('3. Очистить пользовательский кэш ({0})' -f (Format-1CSize -Bytes $userTotal))
+        Write-Host '4. Выбрать базу...'
+        $allowed += @('1', '2', '3', '4')
+    }
+    if ($State.Orphans.Count -gt 0) {
+        Write-Host '5. Осиротевшие базы...'
+        $allowed += '5'
+    }
     Write-Host '0. Выход.'
     Write-Host
+
+    return $allowed
 }
 
 function Show-1CBaseList {
@@ -683,64 +724,83 @@ if ($Help) {
     exit 0
 }
 
-$config = @{
-    IbasesPath      = $IbasesPath
-    StartCfgPath    = $StartCfgPath
-    UserCachePath   = $UserCachePath
-    ProgramCachePath = $ProgramCachePath
+$script:IbasesPath = $IbasesPath
+$script:StartCfgPath = $StartCfgPath
+$script:UserCachePath = $UserCachePath
+$script:ProgramCachePath = $ProgramCachePath
+$script:State = $null
+
+function Update-1CState {
+    <#
+    .SYNOPSIS
+        Перечитывает список баз, осиротевшие базы и размеры кэша.
+    #>
+    $script:State = Get-1CState -IbasesPath $script:IbasesPath -StartCfgPath $script:StartCfgPath -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath
 }
 
-try {
-    $state = Get-1CState @config
+function Invoke-1CBaseSection {
+    <#
+    .SYNOPSIS
+        Показывает список баз и меню действий для выбранной базы.
+    #>
+    while ($true) {
+        $items = @($script:State.Bases)
+        if ($items.Count -eq 0) { return }
 
-    if ($ShowOrphans) { Show-1COrphanDetails -Orphans $state.Orphans }
+        Show-1CBaseList -Bases $items
 
-    :main while ($true) {
-        if ($state.Bases.Count -eq 0) {
-            Write-Host
-            Write-Host 'Базы с кэшем не найдены.'
-            Write-Host
-            break main
-        }
+        $allowed = @('0')
+        for ($i = 1; $i -le $items.Count; $i++) { $allowed += [string] $i }
+        $answer = Read-1CChoice -Allowed $allowed -Prompt 'Номер базы (0 — назад)'
+        if ($answer -eq '0') { return }
 
-        Show-1CMainMenu -State $state
-        $choice = Read-1CChoice -Allowed @('0', '1', '2', '3', '4')
+        $base = $items[[int] $answer - 1]
 
-        if ($choice -eq '0') { break main }
+        while ($true) {
+            Show-1CBaseMenu -Base $base
+            $action = Read-1CChoice -Allowed @('0', '1', '2', '3')
+            if ($action -eq '0') { break }
 
-        if ($choice -eq '4') {
-            :baseList while ($true) {
-                Show-1CBaseList -Bases $state.Bases
-
-                $allowed = @('0')
-                for ($i = 1; $i -le $state.Bases.Count; $i++) { $allowed += [string] $i }
-                $answer = Read-1CChoice -Allowed $allowed -Prompt 'Номер базы (0 — назад)'
-
-                if ($answer -eq '0') { break baseList }
-
-                $base = $state.Bases[[int] $answer - 1]
-
-                :baseMenu while ($true) {
-                    Show-1CBaseMenu -Base $base
-                    $action = Read-1CChoice -Allowed @('0', '1', '2', '3')
-
-                    if ($action -eq '0') { break baseMenu }
-
-                    $kind = switch ($action) {
-                        '1' { 'All' }
-                        '2' { 'Program' }
-                        '3' { 'User' }
-                    }
-
-                    Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases @($base) -Kind $kind -UserCachePath $UserCachePath -ProgramCachePath $ProgramCachePath)
-                    $state = Get-1CState @config
-
-                    # Список баз мог измениться — возвращаемся к нему.
-                    break baseMenu
-                }
+            $kind = switch ($action) {
+                '1' { 'All' }
+                '2' { 'Program' }
+                '3' { 'User' }
             }
-            continue main
+
+            Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases @($base) -Kind $kind -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath)
+            Update-1CState
+
+            # Список баз мог измениться — возвращаемся к нему.
+            break
         }
+    }
+}
+
+function Invoke-1COrphanSection {
+    <#
+    .SYNOPSIS
+        Показывает список осиротевших баз и действия с ними.
+    #>
+    while ($true) {
+        $items = @($script:State.Orphans)
+        if ($items.Count -eq 0) {
+            Write-Host
+            Write-Host 'Осиротевшие базы не найдены.'
+            Write-Host
+            return
+        }
+
+        Show-1COrphanList -Orphans $items
+        Write-Host
+        Write-Host 'Выберите действие с кэшем осиротевших баз:'
+        Write-Host '1. Очистить всё'
+        Write-Host '2. Очистить программный кэш'
+        Write-Host '3. Очистить пользовательский кэш'
+        Write-Host '0. Назад'
+        Write-Host
+
+        $choice = Read-1CChoice -Allowed @('0', '1', '2', '3')
+        if ($choice -eq '0') { return }
 
         $kind = switch ($choice) {
             '1' { 'All' }
@@ -748,9 +808,53 @@ try {
             '3' { 'User' }
         }
 
-        Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases $state.Bases -Kind $kind -UserCachePath $UserCachePath -ProgramCachePath $ProgramCachePath)
-        $state = Get-1CState @config
+        Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases $items -Kind $kind -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath)
+        Update-1CState
     }
+}
+
+function Invoke-1CMainMenu {
+    <#
+    .SYNOPSIS
+        Показывает главное меню и выполняет выбранные действия.
+    #>
+    while ($true) {
+        if ($script:State.Bases.Count -eq 0 -and $script:State.Orphans.Count -eq 0) {
+            Write-Host
+            Write-Host 'Базы с кэшем не найдены.'
+            Write-Host
+            return
+        }
+
+        $allowed = Show-1CMainMenu -State $script:State
+        $choice = Read-1CChoice -Allowed $allowed
+        if ($choice -eq '0') { return }
+
+        switch ($choice) {
+            '1' {
+                Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases $script:State.Bases -Kind All -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath)
+                Update-1CState
+            }
+            '2' {
+                Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases $script:State.Bases -Kind Program -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath)
+                Update-1CState
+            }
+            '3' {
+                Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases $script:State.Bases -Kind User -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath)
+                Update-1CState
+            }
+            '4' { Invoke-1CBaseSection }
+            '5' { Invoke-1COrphanSection }
+        }
+    }
+}
+
+try {
+    Update-1CState
+
+    if ($ShowOrphans) { Show-1COrphanList -Orphans $script:State.Orphans }
+
+    Invoke-1CMainMenu
 }
 catch {
     Write-Host
