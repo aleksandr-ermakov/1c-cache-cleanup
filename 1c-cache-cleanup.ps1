@@ -24,17 +24,11 @@
     Каталог программного кэша баз (папки с именами-GUID).
     По умолчанию: %LOCALAPPDATA%\1C\1cv8.
 
-.PARAMETER ShowOrphans
-    Показывает осиротевшие папки кэша подробно: по идентификаторам с размером.
-
 .PARAMETER Help
     Выводит эту справку и завершает работу. То же самое делают ключи -h и --help.
 
 .EXAMPLE
     .\1c-cache-cleanup.ps1
-
-.EXAMPLE
-    .\1c-cache-cleanup.ps1 -ShowOrphans
 
 .EXAMPLE
     .\1c-cache-cleanup.ps1 -h
@@ -46,7 +40,6 @@ param(
     [string] $StartCfgPath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1CEStart\1cestart.cfg'),
     [string] $UserCachePath = (Join-Path -Path $env:APPDATA -ChildPath '1C\1cv8'),
     [string] $ProgramCachePath = (Join-Path -Path $env:LOCALAPPDATA -ChildPath '1C\1cv8'),
-    [switch] $ShowOrphans,
     [Alias('h')]
     [switch] $Help
 )
@@ -739,7 +732,7 @@ if ($Help) {
         Get-Help -Name $PSCommandPath -Detailed
     }
     catch {
-        Write-Host 'Использование: .\1c-cache-cleanup.ps1 [-IbasesPath <путь>] [-StartCfgPath <путь>] [-UserCachePath <путь>] [-ProgramCachePath <путь>] [-ShowOrphans] [-h]'
+        Write-Host 'Использование: .\1c-cache-cleanup.ps1 [-IbasesPath <путь>] [-StartCfgPath <путь>] [-UserCachePath <путь>] [-ProgramCachePath <путь>] [-h]'
     }
     exit 0
 }
@@ -871,8 +864,6 @@ function Invoke-1CMainMenu {
 
 try {
     Update-1CState
-
-    if ($ShowOrphans) { Show-1COrphanList -Orphans $script:State.Orphans }
 
     Invoke-1CMainMenu
 }
