@@ -429,6 +429,7 @@ function Invoke-1CCacheCleanup {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [object[]] $Bases,
         [Parameter(Mandatory = $true)]
         [ValidateSet('All', 'Program', 'User')]
@@ -996,6 +997,10 @@ catch {
     Write-Host
     Write-Host ('Ошибка: {0}' -f $_.Exception.Message) -ForegroundColor Red
     Write-Host
-    Wait-AnyKey
+
+    # В интерактивном режиме даём прочитать ошибку, в режиме очистки — сразу выходим.
+    if (-not ($ClearAll -or $ClearProgramCache -or $ClearUserCache -or $ClearOrphaned)) {
+        Wait-AnyKey
+    }
     exit 1
 }
