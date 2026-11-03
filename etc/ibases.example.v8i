@@ -1,0 +1,27 @@
+﻿[Демо]
+ID=9e87000d-d7c1-4521-984d-42f4d0f52abc
+OrderInList=-1
+Folder=/
+OrderInTree=50432
+External=0
+[Управление производственным предприятием (демо)]
+Connect=File="D:\Users\Пользователь\1С\Базы\Демо\УПП\";
+ID=e631d576-60e2-488b-9295-d4c42f7422db
+OrderInList=2392320
+Folder=/Демо
+OrderInTree=35584
+External=0
+ClientConnectionSpeed=Normal
+App=Auto
+WA=1
+AppArch=x86_prt
+[Бухгалтерия предприятия (демо)]
+Connect=File="D:\Users\Пользователь\1С\Базы\Демо\Бухгалтерия 3";
+ID=954d78af-5a6b-4a59-97d1-027fec0251c3
+OrderInList=2441472
+Folder=/Демо
+OrderInTree=52224
+External=0
+App=Auto
+WA=1
+AppArch=x86_prt
