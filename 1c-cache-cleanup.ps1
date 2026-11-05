@@ -937,30 +937,54 @@ function Invoke-1CAgeSection {
         if ($script:State.Bases.Count -eq 0) { return }
 
         $now = Get-Date
-        $options = @(
-            [pscustomobject]@{ Number = '1'; Label = 'Старше недели'; Cutoff = $now.AddDays(-7) }
-            [pscustomobject]@{ Number = '2'; Label = 'Старше месяца'; Cutoff = $now.AddMonths(-1) }
-            [pscustomobject]@{ Number = '3'; Label = 'Старше квартала'; Cutoff = $now.AddMonths(-3) }
-            [pscustomobject]@{ Number = '4'; Label = 'Старше года'; Cutoff = $now.AddYears(-1) }
+        $thresholds = @(
+            [pscustomobject]@{ Label = 'Старше недели'; Cutoff = $now.AddDays(-7) }
+            [pscustomobject]@{ Label = 'Старше месяца'; Cutoff = $now.AddMonths(-1) }
+            [pscustomobject]@{ Label = 'Старше квартала'; Cutoff = $now.AddMonths(-3) }
+            [pscustomobject]@{ Label = 'Старше года'; Cutoff = $now.AddYears(-1) }
         )
+
+        # Показываем только те варианты, под которые попадает хотя бы одна база.
+        $options = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($threshold in $thresholds) {
+            [long] $size = 0
+            $count = 0
+            foreach ($base in $script:State.Bases) {
+                if ($null -ne $base.LastModified -and $base.LastModified -lt $threshold.Cutoff) {
+                    $size += $base.ProgramCacheSize + $base.UserCacheSize
+                    $count++
+                }
+            }
+            if ($count -eq 0) { continue }
+
+            $options.Add([pscustomobject]@{
+                    Number = [string] ($options.Count + 1)
+                    Label  = $threshold.Label
+                    Cutoff = $threshold.Cutoff
+                    Size   = $size
+                })
+        }
+
+        if ($options.Count -eq 0) {
+            Write-Host
+            Write-Host 'Баз с кэшем старше недели не найдено.'
+            Write-Host
+            return
+        }
 
         Write-Host
         Write-Host 'Очистка пользовательского и программного кэша баз, по дате изменения папки кэша.'
         Write-Host
 
         foreach ($option in $options) {
-            [long] $size = 0
-            foreach ($base in $script:State.Bases) {
-                if ($null -ne $base.LastModified -and $base.LastModified -lt $option.Cutoff) {
-                    $size += $base.ProgramCacheSize + $base.UserCacheSize
-                }
-            }
-            Write-Host ('{0}. {1} ({2})' -f $option.Number, $option.Label, (Format-1CSize -Bytes $size))
+            Write-Host ('{0}. {1} ({2})' -f $option.Number, $option.Label, (Format-1CSize -Bytes $option.Size))
         }
         Write-Host '0. Назад'
         Write-Host
 
-        $choice = Read-1CChoice -Allowed @('0', '1', '2', '3', '4')
+        $allowed = @('0')
+        foreach ($option in $options) { $allowed += $option.Number }
+        $choice = Read-1CChoice -Allowed $allowed
         if ($choice -eq '0') { return }
 
         $option = $options | Where-Object { $_.Number -eq $choice }
