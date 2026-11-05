@@ -2,6 +2,9 @@
 tmp/
 tmp-*
 
+# Локальные секреты
+.env
+
 # Служебные файлы Windows
 Thumbs.db
 desktop.ini
