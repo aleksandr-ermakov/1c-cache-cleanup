@@ -252,6 +252,25 @@ function Get-1CFolderSizeBytes {
     return $size
 }
 
+function Get-1CFolderLastWriteTime {
+    <#
+    .SYNOPSIS
+        Возвращает дату изменения каталога.
+
+    .DESCRIPTION
+        Для отсутствующего каталога возвращается $null.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $null }
+
+    return (Get-Item -LiteralPath $Path -Force).LastWriteTime
+}
+
 function Get-1CCacheFolders {
     <#
     .SYNOPSIS
@@ -319,10 +338,20 @@ function Get-1CState {
     }
 
     # Сортируем по наименованию (с учётом текущей локали) и считаем размеры кэша.
+    # Возраст базы — более поздняя дата изменения папок пользовательского и программного кэша.
     $bases = @(
         foreach ($base in ($bases | Sort-Object -Property Name)) {
             $userFolder = Join-Path -Path $UserCachePath -ChildPath ([string] $base.Id)
             $programFolder = Join-Path -Path $ProgramCachePath -ChildPath ([string] $base.Id)
+
+            $userTime = Get-1CFolderLastWriteTime -Path $userFolder
+            $programTime = Get-1CFolderLastWriteTime -Path $programFolder
+
+            $lastModified = $null
+            if ($null -ne $userTime) { $lastModified = $userTime }
+            if ($null -ne $programTime -and ($null -eq $lastModified -or $programTime -gt $lastModified)) {
+                $lastModified = $programTime
+            }
 
             [pscustomobject]@{
                 Name             = $base.Name
@@ -332,6 +361,9 @@ function Get-1CState {
                 ProgramCacheSize = Get-1CFolderSizeBytes -Path $programFolder
                 HasUserCache     = Test-Path -LiteralPath $userFolder -PathType Container
                 HasProgramCache  = Test-Path -LiteralPath $programFolder -PathType Container
+                UserCacheTime    = $userTime
+                ProgramCacheTime = $programTime
+                LastModified     = $lastModified
             }
         }
     )
@@ -647,6 +679,10 @@ function Show-1CMainMenu {
         Write-Host '5. Осиротевшие базы...'
         $allowed += '5'
     }
+    if ($State.Bases.Count -gt 0) {
+        Write-Host '6. Очистить по возрасту...'
+        $allowed += '6'
+    }
     Write-Host '0. Выход.'
     Write-Host
 
@@ -892,6 +928,53 @@ function Invoke-1COrphanSection {
     }
 }
 
+function Invoke-1CAgeSection {
+    <#
+    .SYNOPSIS
+        Показывает очистку кэша баз по возрасту папки кэша.
+    #>
+    while ($true) {
+        if ($script:State.Bases.Count -eq 0) { return }
+
+        $now = Get-Date
+        $options = @(
+            [pscustomobject]@{ Number = '1'; Label = 'Старше недели'; Cutoff = $now.AddDays(-7) }
+            [pscustomobject]@{ Number = '2'; Label = 'Старше месяца'; Cutoff = $now.AddMonths(-1) }
+            [pscustomobject]@{ Number = '3'; Label = 'Старше квартала'; Cutoff = $now.AddMonths(-3) }
+            [pscustomobject]@{ Number = '4'; Label = 'Старше года'; Cutoff = $now.AddYears(-1) }
+        )
+
+        Write-Host
+        Write-Host 'Очистка пользовательского и программного кэша баз, по дате изменения папки кэша.'
+        Write-Host
+
+        foreach ($option in $options) {
+            [long] $size = 0
+            foreach ($base in $script:State.Bases) {
+                if ($null -ne $base.LastModified -and $base.LastModified -lt $option.Cutoff) {
+                    $size += $base.ProgramCacheSize + $base.UserCacheSize
+                }
+            }
+            Write-Host ('{0}. {1} ({2})' -f $option.Number, $option.Label, (Format-1CSize -Bytes $size))
+        }
+        Write-Host '0. Назад'
+        Write-Host
+
+        $choice = Read-1CChoice -Allowed @('0', '1', '2', '3', '4')
+        if ($choice -eq '0') { return }
+
+        $option = $options | Where-Object { $_.Number -eq $choice }
+        $bases = @(
+            foreach ($base in $script:State.Bases) {
+                if ($null -ne $base.LastModified -and $base.LastModified -lt $option.Cutoff) { $base }
+            }
+        )
+
+        Show-1CCleanupResult -Result (Invoke-1CCacheCleanup -Bases $bases -Kind All -UserCachePath $script:UserCachePath -ProgramCachePath $script:ProgramCachePath)
+        Update-1CState
+    }
+}
+
 function Invoke-1CMainMenu {
     <#
     .SYNOPSIS
@@ -924,6 +1007,7 @@ function Invoke-1CMainMenu {
             }
             '4' { Invoke-1CBaseSection }
             '5' { Invoke-1COrphanSection }
+            '6' { Invoke-1CAgeSection }
         }
     }
 }
